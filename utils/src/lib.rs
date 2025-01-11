@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::prelude::*;
 
-pub const FIRST_YEAR: u32 = 2015;
+pub const FIRST_YEAR: u32 = 2024; //true first year: 2015
 
 pub fn get_year_month_day() -> (u32, u32, u32) {
     let date = Utc::now().with_timezone(&FixedOffset::west_opt(5 * 3600).unwrap());
