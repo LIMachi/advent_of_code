@@ -1,5 +1,4 @@
-/target
+target
 .idea
-inputs
 advent_of_code.iml
 Cargo.lock
