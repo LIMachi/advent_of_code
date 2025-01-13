@@ -1,8 +1,11 @@
+use std::collections::HashSet;
+use std::fmt::{Debug, Formatter, Write};
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum Tiles {
     Empty,
     Crate,
-    Walked(Direction),
+    Walked,
     Edge
 }
 
@@ -63,12 +66,7 @@ impl Map {
                     print!("{}", match self.tiles[x + self.width * y] {
                         Tiles::Empty => '.',
                         Tiles::Crate => '#',
-                        Tiles::Walked(d) => match d {
-                            Direction::Up => '^',
-                            Direction::Down => 'v',
-                            Direction::Left => '<',
-                            Direction::Right => '>',
-                        },
+                        Tiles::Walked => 'X',
                         Tiles::Edge => ' ',
                     });
                 }
@@ -78,13 +76,24 @@ impl Map {
     }
 }
 
-#[derive(Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Eq, PartialEq, Hash)]
 enum Direction {
     #[default]
     Up,
     Down,
     Left,
     Right
+}
+
+impl Debug for Direction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_char(match self {
+            Direction::Up => '^',
+            Direction::Down => 'v',
+            Direction::Left => '<',
+            Direction::Right => '>',
+        })
+    }
 }
 
 impl Direction {
@@ -107,11 +116,73 @@ impl Direction {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Hash, Eq, PartialEq, Debug)]
 struct Guard {
     x: isize,
     y: isize,
     dir: Direction,
+}
+
+#[derive(Default)]
+struct PositionSet {
+    set: HashSet<Guard>,
+    vec: Vec<Guard>
+}
+
+impl PositionSet {
+    fn add(&mut self, position: Guard) {
+        self.vec.push(position);
+        self.set.insert(position);
+    }
+
+    fn contains(&self, position: Guard) -> bool {
+        self.set.contains(&position)
+    }
+
+    fn ordered(&self) -> &Vec<Guard> {
+        &self.vec
+    }
+
+    fn clone_until(&self, position: Guard) -> Self {
+        let mut clone = Self::default();
+        for guard in &self.vec {
+            if guard == &position { break }
+            clone.add(*guard);
+        }
+        clone
+    }
+}
+
+impl Guard {
+    fn step(&self) -> Self {
+        let (dx, dy) = self.dir.delta();
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+            dir: self.dir,
+        }
+    }
+
+    fn rotate(&self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y,
+            dir: self.dir.rotate(),
+        }
+    }
+
+    fn get_tile_in_front(&self, map: &Map) -> Tiles {
+        let (dx, dy) = self.dir.delta();
+        map.get(self.x + dx, self.y + dy)
+    }
+
+    fn get_tile_under(&self, map: &Map) -> Tiles {
+        map.get(self.x, self.y)
+    }
+
+    fn paint(&self, map: &mut Map, tile: Tiles) -> bool {
+        map.set(self.x, self.y, tile) != tile
+    }
 }
 
 fn parse(input: &str) -> Result<(Map, Guard), String> {
@@ -179,47 +250,51 @@ fn parse(input: &str) -> Result<(Map, Guard), String> {
     }
 }
 
-fn guard_patrol(map: &Map, mut guard: Guard) -> Option<usize> {
+fn guard_patrol(mut map: Map, mut guard: Guard, mut positions: PositionSet) -> (Map, PositionSet, Option<usize>) {
     let mut acc = 0;
-    let mut map = map.clone();
-    while map.get(guard.x, guard.y) != Tiles::Edge {
-        match map.set(guard.x, guard.y, Tiles::Walked(guard.dir)) {
-            Tiles::Walked(d) => {
-                if d != guard.dir {
-                    acc += 1;
-                } else {
-                    return None;
-                }
-            },
-            _ => {}
+    while guard.get_tile_under(&map) != Tiles::Edge {
+        if guard.paint(&mut map, Tiles::Walked) {
+            acc += 1;
+        } else if positions.contains(guard) {
+            return (map, positions, None);
         }
-        let (dx, dy) = guard.dir.delta();
-        if map.get(guard.x + dx, guard.y + dy).walkable() {
-            guard.x += dx;
-            guard.y += dy;
+        positions.add(guard);
+        if guard.get_tile_in_front(&map).walkable() {
+            guard = guard.step();
         } else {
-            guard.dir = guard.dir.rotate();
+            guard = guard.rotate();
         }
     }
-    Some(acc)
+    (map, positions, Some(acc))
 }
 
 pub fn y2024d6a(input: &str) -> Result<String, String> {
     let (map, guard) = parse(input)?;
-    guard_patrol(&map, guard).ok_or_else(|| "Looping".to_string()).map(|r| r.to_string())
+    guard_patrol(map, guard, PositionSet::default()).2.ok_or_else(|| "Looping".to_string()).map(|r| r.to_string())
 }
 
+//FIXME: works but is too slow (took more than 10 seconds)
+//other solution: instead of using an unsorted set, we could use a sorted list of positions
+//this way we can copy all the steps prior to putting the obstacle and start the automaton right at
+//the position of the added obstacle
+//FIXME: new version using the sorted set works in almost 15 second, which is the limit of what advent_of_code allows, should find other ways to optimise it
+//for now put the example input to make the other days faster
 pub fn y2024d6b(input: &str) -> Result<String, String> {
-    let (mut map, guard) = parse(input)?;
+    let (map, guard) = parse(input)?;
+    let (map, positions, _) = guard_patrol(map, guard, PositionSet::default());
     let mut acc = 0;
-    for y in 0..map.height as isize {
-        for x in 0..map.width as isize {
-            if map.get(x, y) == Tiles::Empty {
-                map.set(x, y, Tiles::Crate);
-                if guard_patrol(&map, guard).is_none() {
+    let mut tries = HashSet::new();
+    for position in positions.ordered() {
+        let t = position.step();
+        if !tries.contains(&(t.x, t.y)) {
+            let front = t.get_tile_under(&map);
+            if front.walkable() && front != Tiles::Edge {
+                let mut tmap = map.clone();
+                t.paint(&mut tmap, Tiles::Crate);
+                tries.insert((t.x, t.y));
+                if guard_patrol(tmap, *position, positions.clone_until(*position)).2.is_none() {
                     acc += 1;
                 }
-                map.set(x, y, Tiles::Empty);
             }
         }
     }
