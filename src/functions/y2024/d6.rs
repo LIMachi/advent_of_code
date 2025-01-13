@@ -18,7 +18,6 @@ impl Tiles {
     }
 }
 
-#[derive(Clone)]
 struct Map {
     width: usize,
     height: usize,
@@ -250,13 +249,13 @@ fn parse(input: &str) -> Result<(Map, Guard), String> {
     }
 }
 
-fn guard_patrol(mut map: Map, mut guard: Guard, mut positions: PositionSet) -> (Map, PositionSet, Option<usize>) {
+fn guard_patrol(map: &mut Map, mut guard: Guard, mut positions: PositionSet) -> (PositionSet, Option<usize>) {
     let mut acc = 0;
     while guard.get_tile_under(&map) != Tiles::Edge {
-        if guard.paint(&mut map, Tiles::Walked) {
+        if guard.paint(map, Tiles::Walked) {
             acc += 1;
         } else if positions.contains(guard) {
-            return (map, positions, None);
+            return (positions, None);
         }
         positions.add(guard);
         if guard.get_tile_in_front(&map).walkable() {
@@ -265,23 +264,18 @@ fn guard_patrol(mut map: Map, mut guard: Guard, mut positions: PositionSet) -> (
             guard = guard.rotate();
         }
     }
-    (map, positions, Some(acc))
+    (positions, Some(acc))
 }
 
 pub fn y2024d6a(input: &str) -> Result<String, String> {
-    let (map, guard) = parse(input)?;
-    guard_patrol(map, guard, PositionSet::default()).2.ok_or_else(|| "Looping".to_string()).map(|r| r.to_string())
+    let (mut map, guard) = parse(input)?;
+    guard_patrol(&mut map, guard, PositionSet::default()).1.ok_or_else(|| "Looping".to_string()).map(|r| r.to_string())
 }
 
-//FIXME: works but is too slow (took more than 10 seconds)
-//other solution: instead of using an unsorted set, we could use a sorted list of positions
-//this way we can copy all the steps prior to putting the obstacle and start the automaton right at
-//the position of the added obstacle
-//FIXME: new version using the sorted set works in almost 15 second, which is the limit of what advent_of_code allows, should find other ways to optimise it
-//for now put the example input to make the other days faster
+//works in under 2 seconds in release mode, almost 15 seconds in debug mode
 pub fn y2024d6b(input: &str) -> Result<String, String> {
-    let (map, guard) = parse(input)?;
-    let (map, positions, _) = guard_patrol(map, guard, PositionSet::default());
+    let (mut map, guard) = parse(input)?;
+    let (positions, _) = guard_patrol(&mut map, guard, PositionSet::default());
     let mut acc = 0;
     let mut tries = HashSet::new();
     for position in positions.ordered() {
@@ -289,12 +283,12 @@ pub fn y2024d6b(input: &str) -> Result<String, String> {
         if !tries.contains(&(t.x, t.y)) {
             let front = t.get_tile_under(&map);
             if front.walkable() && front != Tiles::Edge {
-                let mut tmap = map.clone();
-                t.paint(&mut tmap, Tiles::Crate);
+                t.paint(&mut map, Tiles::Crate);
                 tries.insert((t.x, t.y));
-                if guard_patrol(tmap, *position, positions.clone_until(*position)).2.is_none() {
+                if guard_patrol(&mut map, *position, positions.clone_until(*position)).1.is_none() {
                     acc += 1;
                 }
+                t.paint(&mut map, Tiles::Walked);
             }
         }
     }
