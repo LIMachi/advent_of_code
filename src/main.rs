@@ -2,6 +2,7 @@
 #![feature(let_chains)]
 
 #![allow(dead_code)]
+extern crate nom;
 
 use std::env::args;
 use std::fs;
