@@ -13,6 +13,7 @@ use utils::*;
 
 mod p2024;
 mod functions;
+mod advent_utils;
 
 advent_of_code_setup!();
 
